@@ -14,7 +14,7 @@ router = APIRouter()
 # Активные игры
 active_games: Dict[str, Dict[str, WebSocket]] = {}
 
-# 📌 Создание игры
+# Создание игры
 @router.post("/create")
 async def create_game(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
     new_game = ActiveGame(player1_id=str(user.user_id), current_state={})  # UUID пользователя
@@ -23,7 +23,7 @@ async def create_game(db: AsyncSession = Depends(get_db), user: User = Depends(g
     await db.refresh(new_game)
     return {"game_id": str(new_game.game_id)}
 
-# 📌 Получение списка доступных игр
+# Получение списка доступных игр
 @router.get("/list", response_model=List[GameResponse])
 async def list_games(db: AsyncSession = Depends(get_db)):
     print("Запрос списка игр")
@@ -33,7 +33,7 @@ async def list_games(db: AsyncSession = Depends(get_db)):
         games = result.scalars().all()
         print("Найдено игр: ", len(games))
     except Exception as e:
-        print("❌ Ошибка при получении игр:", str(e))
+        print("Ошибка при получении игр:", str(e))
         games = []  # Инициализируем games пустым списком
     
     return [
@@ -45,7 +45,7 @@ async def list_games(db: AsyncSession = Depends(get_db)):
         for game in games
     ]
 
-# 📌 Присоединение к игре
+# Присоединение к игре
 @router.post("/join/{game_id}")
 async def join_game(
     game_id: str, 
@@ -64,10 +64,10 @@ async def join_game(
     await db.commit()
     return {"game_id": game_id, "player2_id": game.player2_id}
 
-# 📌 WebSocket соединение для игры
+# WebSocket соединение для игры
 @router.websocket("/ws/game")
 async def game_websocket(websocket: WebSocket, game_id: str, player_id: str, token: str):
-    print(f"▶ Подключение: game_id={game_id}, player_id={player_id}, token={token[:10]}...")
+    print(f"Подключение: game_id={game_id}, player_id={player_id}, token={token[:10]}...")
     try:
         user = await get_current_user(token)
         if not user:
@@ -76,30 +76,30 @@ async def game_websocket(websocket: WebSocket, game_id: str, player_id: str, tok
             return
 
         await websocket.accept()
-        print("✅ WebSocket подключен")
+        print(" WebSocket подключен")
         if game_id not in active_games:
             active_games[game_id] = {}
 
         active_games[game_id][player_id] = websocket
-        print(f"✅ Игрок {player_id} подключился к игре {game_id}")
+        print(f" Игрок {player_id} подключился к игре {game_id}")
 
         try:
             while True:
                 data = await websocket.receive_json()
-                print(f"📩 Получен ход: {data}")  # 👈 Логируем полученные данные
+                print(f" Получен ход: {data}")  #  Логируем полученные данные
 
                 game_state = await process_move(game_id, data["player_id"], data["hole_index"], db)
                 
-                print(f"📤 Отправляем обновленный game_state: {game_state}")
+                print(f" Отправляем обновленный game_state: {game_state}")
 
                 for player_ws in active_games[game_id].values():
                     await player_ws.send_json({"game_state": game_state})
 
         except WebSocketDisconnect:
-            print(f"⚠️ Игрок {player_id} отключился от игры {game_id}")
+            print(f" Игрок {player_id} отключился от игры {game_id}")
             del active_games[game_id][player_id]
     except Exception as e:
-        print(f"❌ Ошибка: {str(e)}")
+        print(f" Ошибка: {str(e)}")
 
     
 
