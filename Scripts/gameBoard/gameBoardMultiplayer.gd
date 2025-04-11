@@ -6,12 +6,16 @@ var game_logic = preload("res://Scripts/togyz_kumalak_core.gd").new()
 var PLAYER1
 var PLAYER2
 var NUM_HOLES
-var start_time = 0  # Добавляем переменную для отслеживания времени
+var start_time = 0  # Для отслеживания времени
+var lobby_id = Global.current_game_id
+var my_user_id = ""
 
-@onready var tuzduk_highlight = preload("res://assets/board/tuzduk_highlight.png")    # Золотая рамка
+@onready var tuzduk_highlight = preload("res://assets/board/tuzduk_highlight.png")
 @onready var connection_status_label = $CanvasLayer/ConnectionStatus
-@onready var label_player1 = $CanvasLayer/WrapperTahaForPlayer1/LabelForPlayer1
+@onready var label_player1 = $CanvasLayer/WrapperTahaForPlayer1/LabelForPlayer1 #значения колодцев
 @onready var label_player2 = $CanvasLayer/WrapperTahaForPlayer2/LabelForPlayer2
+@onready var LabelForPlayer1 = $CanvasLayer/LabelForPlayer1 #отоброжение ника игрока
+@onready var LabelForPlayer2 = $CanvasLayer/LabelForPlayer2 
 @onready var taha_player1 = $CanvasLayer/TahaPlayer1
 @onready var taha_player2 = $CanvasLayer/TahaPlayer2
 @onready var kazan_player1 = $CanvasLayer/WrapperTahaForPlayer1
@@ -25,17 +29,29 @@ func _ready():
 	PLAYER1 = game_logic.PLAYER1
 	PLAYER2 = game_logic.PLAYER2
 	NUM_HOLES = game_logic.NUM_HOLES
-	start_time = Time.get_ticks_msec()  # Записываем время начала игры
+	start_time = Time.get_ticks_msec()  # Время начала игры
 	game_logic.initialize_game()
-	websocket_client.connect("connection_established", Callable(self, "_on_connection_established"))
+	
+	if Global.user_id == "":
+		var token_parts = Global.user_token.split(".")
+		if token_parts.size() > 1:
+			var payload = JSON.parse_string(token_parts[1].base64_decode().get_string_from_utf8())
+			Global.user_id = payload["sub"]
+	my_user_id = Global.user_id
+	print("ℹ️ Мой user_id:", my_user_id)
+	
+	add_child(websocket_client) # Добавляем в дерево
+	
+	# Подключаем WebSocket-обработчики
+	websocket_client.connect("connected", Callable(self, "_on_connection_established"))
 	websocket_client.connect("connection_failed", Callable(self, "_on_connection_failed"))
 	websocket_client.connect("game_state_updated", Callable(self, "_update_game_state"))
-	websocket_client.connect_to_game(
-	Global.current_game_id,
-	Global.user_id,
-	Global.user_token  # Передаем токен авторизации
-)
-
+	websocket_client.connect("move_received", Callable(self, "_on_move_received"))
+	websocket_client.connect("game_ended", Callable(self, "_on_game_end"))
+	websocket_client.connect("game_started", Callable(self, "_on_game_started"))
+	websocket_client.connect("player_info_received", Callable(self, "_on_player_info_received"))
+	websocket_client.connect_to_lobby(lobby_id)  
+	
 	setup_hole_buttons()
 	update_board()
 
@@ -54,13 +70,13 @@ func setup_hole_buttons():
 		slot1.connect("input_event", Callable(self, "_on_slot_input_event").bind(PLAYER1, i))
 		slot2.connect("input_event", Callable(self, "_on_slot_input_event").bind(PLAYER2, i))
 
-# 📌 Игрок делает ход
+# Игрок делает ход
 func _on_slot_input_event(_area, event, _shape_idx, player, hole_index):
 	if event is InputEventMouseButton and event.pressed:
 		if player == game_logic.current_player:
 			websocket_client.send_move(hole_index)  # Отправляем ход на сервер
 
-# 📌 Обновление состояния игры с сервера
+# Обновление состояния игры с сервера
 func _update_game_state(new_state):
 	if not new_state.has("board") or not new_state.has("kazans"):
 		print("❌ Invalid game state")
@@ -73,6 +89,38 @@ func _update_game_state(new_state):
 
 	if new_state.get("winner", -1) != -1:
 		show_endgame_popup(new_state.winner)
+
+	update_board()  
+
+func _on_player_info_received(data: Dictionary):
+	print("ℹ️ Обработка player_info:", data)
+	var player = data["player"]
+	if my_user_id == player["id"]:
+		LabelForPlayer1.text = player["username"]  # Отображаем ник текущего игрока
+		LabelForPlayer2.text = "Waiting..."  # Ждём второго игрока
+	print("✅ Установлен мой ник: ", LabelForPlayer1.text)
+
+# Обработка сообщений от WebSocket
+func _on_game_started(data: Dictionary):
+	print("🎮 Обработка game_start:", data)
+	var player1 = data["player1"]
+	var player2 = data["player2"]
+	if my_user_id == player1["id"]:
+		LabelForPlayer1.text = player1["username"]  # Мой ник внизу слева
+		LabelForPlayer2.text = player2["username"] if player2["username"] else "Waiting..."  # Противник вверху справа
+	else:
+		LabelForPlayer1.text = player2["username"]  # Мой ник внизу слева
+		LabelForPlayer2.text = player1["username"]  # Противник вверху справа
+
+func _on_move_received(hole_index: int):
+	# Обработка принятого хода от другого игрока
+	print("Получен ход игрока: ", hole_index)
+	# Обновление  состояния игры
+	update_board()
+
+func _on_game_end(result: String):
+	# Завершаем игру и показываем результаты
+	show_endgame_popup(result)
 
 func update_board():
 	label_player1.text = str(game_logic.kazans[PLAYER1])
@@ -93,7 +141,7 @@ func update_board():
 				highlight.scale.y = 1.621
 				slot.add_child(highlight)
 
-	# Убедимся, что туздук отображается корректно для обоих игроков
+	# Обновление туздука для обоих игроков
 	for opponent in [PLAYER1, PLAYER2]:
 		if game_logic.tuz_declared[opponent] != -1:
 			var slot_opponent = get_slot(1 - opponent, game_logic.tuz_declared[opponent])
@@ -108,16 +156,16 @@ func update_board():
 	update_kazan(PLAYER1)
 	update_kazan(PLAYER2)
 
-# 📌 Завершение игры
-func show_endgame_popup(winner):
+# Завершение игры
+func show_endgame_popup(result):
 	var total_time = (Time.get_ticks_msec() - start_time) / 1000.0  # Общее время в секундах
-	var winner_text = "Ничья!"
-	if winner == PLAYER1:
-		winner_text = "Победил Игрок 1!"
-	elif winner == PLAYER2:
-		winner_text = "Победил Игрок 2!"
+	var result_text = "Ничья!"
+	if result == "player1":
+		result_text = "Победил Игрок 1!"
+	elif result == "player2":
+		result_text = "Победил Игрок 2!"
 
-	var info_text = "%s\nСчёт: %d - %d\nОбщее время партии: %.2f сек." % [winner_text, game_logic.kazans[PLAYER1], game_logic.kazans[PLAYER2], total_time]
+	var info_text = "%s\nСчёт: %d - %d\nОбщее время партии: %.2f сек." % [result_text, game_logic.kazans[PLAYER1], game_logic.kazans[PLAYER2], total_time]
 	label_endgame_info.text = info_text
 	popup_endgame.popup_centered()
 	popup_endgame.show()
@@ -127,14 +175,14 @@ func clear_tuzduk_highlight(slot):
 		if child.name == "TuzdukHighlight":
 			child.queue_free()
 
-# 📌 Очистка лунки
+# Очистка лунки
 func clear_hole(player, hole_index):
 	var slot = get_slot(player, hole_index)
 	for child in slot.get_children():
 		if child.name != "Label" and child.name != "CollisionShape2D" and child.name != "TuzdukHighlight":
 			child.queue_free()
 
-# 📌 Добавление камней в лунку
+# Добавление камней в лунку
 func add_stones_to_hole(player, hole_index, num_stones):
 	var slot = get_slot(player, hole_index)
 	var label = slot.get_node("Label")
@@ -155,13 +203,13 @@ func add_stones_to_hole(player, hole_index, num_stones):
 			stone.position = center + offset
 			slot.add_child(stone)
 
-# 📌 Очистка казана
+# Очистка казана
 func clear_kazan(kazan):
 	for child in kazan.get_children():
 		if child.name != "WrapperTahaForPlayer" and child.name != "CollisionShape2D" and child.name != "LabelForPlayer1" and child.name != "LabelForPlayer2":
 			child.queue_free()
 
-# 📌 Обновление казана
+# Обновление казана
 func update_kazan(player):
 	var kazan = kazan_player1 if player == PLAYER1 else kazan_player2
 	clear_kazan(kazan)
@@ -189,17 +237,6 @@ func update_kazan(player):
 			stone.position = Vector2(x_pos, y_pos)
 			kazan.add_child(stone)
 
-# 📌 Получение слота (лунки)
 func get_slot(player, hole_index):
 	var slots = taha_player1 if player == PLAYER1 else taha_player2
 	return slots.get_node("myArea2D" + str(hole_index + 1))
-
-# 📌 Возвращение в меню
-func _on_return_menu_pressed():
-	get_tree().change_scene_to_file("res://scenes/main.tscn")
-
-# 📌 Начать новую игру
-func _on_new_game_pressed():
-	game_logic.initialize_game()
-	update_board()
-	popup_endgame.hide()

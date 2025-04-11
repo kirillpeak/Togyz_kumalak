@@ -93,6 +93,8 @@ func _on_game_created(_result, response_code, _headers, body):
 		var game = JSON.parse_string(body.get_string_from_utf8())
 		print("🎮 Игра создана! ID: ", game["game_id"])
 		Global.current_game_id = game["game_id"]
+		# Сохраняем player1_id в глобальной переменной, чтобы он не был пустым
+		Global.user_id = game["player1_id"]
 		get_tree().change_scene_to_file("res://scenes/gameBoardMultiplayer.tscn")
 	else:
 		print("❌ Ошибка создания игры! Код:", response_code, " Ответ:", body.get_string_from_utf8())

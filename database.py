@@ -2,6 +2,8 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from config import DATABASE_URL
+from contextlib import asynccontextmanager
+
 
 # Создаем объект Base
 Base = declarative_base()

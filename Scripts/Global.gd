@@ -5,6 +5,7 @@ var user_id: String  = ""
 var is_logged_in: bool = false
 var current_game_id: String  = ""
 
+
 func _ready():
 	load_auth_data()
 

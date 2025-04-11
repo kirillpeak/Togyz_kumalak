@@ -31,26 +31,53 @@ def create_access_token(data: dict, expires_delta: timedelta):
     to_encode = data.copy()
     expire = datetime.utcnow() + expires_delta
     to_encode.update({"exp": expire})
+    # Изменено на user_id вместо email
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
-
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login")
+data={"sub": str(User.user_id)}
 async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession = Depends(get_db)):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        user_email = payload.get("sub")
+        user_id = payload.get("sub")  # Получаем user_id из токена
 
-        if not user_email:
+        if not user_id:
             raise HTTPException(status_code=401, detail="Invalid token")
 
-        result = await db.execute(select(User).where(User.email == user_email))
-        user = result.scalars().first()
+        user = await db.get(User, uuid.UUID(user_id))  # Используем user_id, а не email
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
 
         return user
     except JWTError as e:
         raise HTTPException(status_code=401, detail="Token decoding error")
+
+async def get_user_from_token(token: str, db: AsyncSession) -> User:
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        print(f"Декодированный payload: {payload}")
+        user_id = payload.get("sub")
+        print(f"Извлечённый user_id: {user_id}")
+        if not user_id:
+            print("❌ user_id не найден в токене")
+            return None
+        user_uuid = uuid.UUID(user_id)
+        print(f"Преобразованный UUID: {user_uuid}")
+        user = await db.get(User, user_uuid)
+        if user:
+            print(f"✅ Пользователь найден: {user.user_id}")
+        else:
+            print(f"❌ Пользователь с user_id {user_uuid} не найден")
+        return user
+    except jwt.ExpiredSignatureError:
+        print("❌ Токен истёк")
+        return None
+    except jwt.InvalidTokenError:
+        print("❌ Недействительный токен")
+        return None
+    except Exception as e:
+        print(f"❌ Ошибка в get_user_from_token: {e}")
+        return None
 
 def decode_access_token(token: str):
     try:
@@ -108,7 +135,7 @@ async def login_user(login_data: UserLogin, db: AsyncSession = Depends(get_db)):
 
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
-        data={"sub": user.email}, expires_delta=access_token_expires
+        data={"sub": str(user.user_id)}, expires_delta=access_token_expires
     )
 
     return {"access_token": access_token, "token_type": "bearer"}
